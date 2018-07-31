@@ -7,13 +7,40 @@
     android:fitsSystemWindows="true"
     tools:context=".MainActivity">
 
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/app_screen"
+    <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:layout_marginBottom="130dp"
-        android:orientation="vertical"
-        tools:listitem="@layout/card" />
+        android:layout_height="match_parent">
 
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/app_screen"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_above="@+id/center"
+                android:layout_marginBottom="30dp"
+                android:orientation="vertical"
+                tools:listitem="@layout/card" />
+
+            <LinearLayout
+                android:id="@+id/center"
+                android:focusable="true"
+                android:focusableInTouchMode="true"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_centerInParent="true"
+                tools:ignore="Orientation,UselessLeaf" />
+
+        </RelativeLayout>
+
+        <RelativeLayout
+            android:id="@+id/foreground"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+        </RelativeLayout>
+    </FrameLayout>
     <include layout="@layout/bottom_sheet" />
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

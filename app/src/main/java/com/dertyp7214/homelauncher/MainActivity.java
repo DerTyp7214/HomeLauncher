@@ -11,11 +11,16 @@ import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Resources;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Color;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.util.DisplayMetrics;
+import android.util.Log;
 import android.view.DragEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -32,12 +37,22 @@ import com.dertyp7214.homelauncher.component.TextDrawable;
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
 import com.google.android.material.textfield.TextInputEditText;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.File;
+import java.io.FileOutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
+import static com.dertyp7214.homelauncher.Utils.addAlpha;
+import static com.dertyp7214.homelauncher.Utils.drawableToBitmap;
 import static com.dertyp7214.homelauncher.Utils.hideKeyboard;
+import static com.dertyp7214.homelauncher.Utils.manipulateColor;
+import static com.dertyp7214.homelauncher.Utils.mixTwoColors;
+import static com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_COLLAPSED;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -56,25 +71,28 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        findViewById(R.id.content).setOnDragListener(new MyDragListener());
+        findViewById(R.id.app_screen).setOnDragListener(new MyDragListener());
 
         RelativeLayout bottomSheet = findViewById(R.id.bottom_sheet);
+        View backGround = findViewById(R.id.foreground);
 
         textInputEditTextSearch = findViewById(R.id.input_search);
         recyclerViewApps = findViewById(R.id.rv);
         icClear = findViewById(R.id.ic_clear);
         bottomSheetBehavior = BottomSheetBehavior.from(bottomSheet);
-        bottomSheetBehavior
-                .setPeekHeight(bottomSheetBehavior.getPeekHeight() + navigationBarHeight());
-        bottomSheetBehavior.setState(BottomSheetBehavior.STATE_HALF_EXPANDED);
         textInputEditTextSearch.setEnabled(false);
-        setMargins(recyclerViewApps, - 1, - 1, - 1, navigationBarHeight());
+
+        getWindow().setNavigationBarColor(manipulateColor(Color.WHITE, 0.9F));
 
         appScreen = new AppScreen(this);
 
         bottomSheetBehavior.setBottomSheetCallback(new BottomSheetBehavior.BottomSheetCallback() {
             @Override
             public void onStateChanged(@NonNull View view, int i) {
+                if (i != STATE_COLLAPSED)
+                    backGround.setVisibility(View.VISIBLE);
+                else
+                    backGround.setVisibility(View.GONE);
                 if (i == BottomSheetBehavior.STATE_EXPANDED) {
                     if (Objects.requireNonNull(textInputEditTextSearch.getText()).toString()
                             .length() > 0)
@@ -87,7 +105,18 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onSlide(@NonNull View view, float v) {
-
+                Log.d("SLIDE", v + "");
+                getWindow().setNavigationBarColor(mixTwoColors(manipulateColor(Color.WHITE, 0.9F),
+                        manipulateColor(getResources().getColor(R.color.listBackground), 0.9F),
+                        1F - v));
+                float offset = v / 1 * 0.5F;
+                if (String.valueOf(offset).equals("NaN"))
+                    offset = 0.5F;
+                try {
+                    int color = Color.parseColor(addAlpha("#000000", offset));
+                    backGround.setBackgroundColor(color);
+                } catch (Exception ignored) {
+                }
             }
         });
 
@@ -170,6 +199,19 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setUpApps(RecyclerView appList) {
+        runOnUiThread(() -> {
+            appAdapter = new AppAdapter(this, apps);
+            appList.setAdapter(appAdapter);
+            appList.setLayoutManager(new LinearLayoutManager(this));
+            textInputEditTextSearch.setEnabled(true);
+            loadData();
+            apps.clear();
+            apps.addAll(appsList);
+            appAdapter.notifyDataSetChanged();
+            hideKeyboard(this);
+            textInputEditTextSearch.clearFocus();
+            bottomSheetBehavior.setState(STATE_COLLAPSED);
+        });
         List<PackageInfo> packages = getPackageManager().getInstalledPackages(0);
         List<PackageInfo> withoutStart = new ArrayList<>();
         for (PackageInfo packageInfo : packages)
@@ -197,13 +239,64 @@ public class MainActivity extends AppCompatActivity {
         apps.addAll(appsList);
 
         runOnUiThread(() -> {
-            appAdapter = new AppAdapter(this, apps);
-            appList.setAdapter(appAdapter);
-            appList.setLayoutManager(new LinearLayoutManager(this));
-            textInputEditTextSearch.setEnabled(true);
-            if (bottomSheetBehavior.getState() == BottomSheetBehavior.STATE_HALF_EXPANDED)
-                bottomSheetBehavior.setState(BottomSheetBehavior.STATE_COLLAPSED);
+            appAdapter.notifyDataSetChanged();
+            saveData();
         });
+    }
+
+    private void loadData() {
+        try {
+            JSONArray array =
+                    JSONSharedPreferences.loadJSONArray(this, "appScreen", "completeAppList");
+            appsList.clear();
+            for (int i = 0; i < array.length(); i++) {
+                JSONObject object = array.getJSONObject(i);
+                String packageName = object.getString("packageName");
+                File imgFile = new File(getFilesDir(), packageName + ".png");
+                Drawable pic;
+                if (imgFile.exists()) {
+                    BitmapFactory.Options options = new BitmapFactory.Options();
+                    options.inPreferredConfig = Bitmap.Config.ARGB_8888;
+                    pic = new BitmapDrawable(getResources(),
+                            BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options));
+                } else {
+                    try {
+                        pic = getPackageManager().getApplicationLogo(
+                                getPackageManager()
+                                        .getApplicationInfo(packageName, 0));
+                    } catch (PackageManager.NameNotFoundException e) {
+                        e.printStackTrace();
+                        pic = getResources().getDrawable(R.drawable.ic_no_icon);
+                    }
+                }
+                appsList.add(new App(pic, object.getString("name"), packageName));
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void saveData() {
+        try {
+            JSONArray array = new JSONArray();
+
+            for (App app : appsList) {
+                File imgFile = new File(getFilesDir(), app.getPackageName() + ".png");
+                if (! imgFile.exists()) {
+                    FileOutputStream fileOutputStream = new FileOutputStream(imgFile);
+                    drawableToBitmap(app.getIcon())
+                            .compress(Bitmap.CompressFormat.PNG, 100, fileOutputStream);
+                }
+                JSONObject object = new JSONObject();
+                object.put("packageName", app.getPackageName());
+                object.put("name", app.getName());
+                array.put(object);
+            }
+
+            JSONSharedPreferences.saveJSONArray(this, "appScreen", "completeAppList", array);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     private String getLabel(String packageName) {
@@ -261,7 +354,7 @@ public class MainActivity extends AppCompatActivity {
         if (textInputEditTextSearch.hasFocus())
             textInputEditTextSearch.clearFocus();
         else if (bottomSheetBehavior.getState() == BottomSheetBehavior.STATE_EXPANDED)
-            bottomSheetBehavior.setState(BottomSheetBehavior.STATE_COLLAPSED);
+            bottomSheetBehavior.setState(STATE_COLLAPSED);
     }
 
     @Override
@@ -279,7 +372,7 @@ public class MainActivity extends AppCompatActivity {
             view.startDrag(data, shadowBuilder, view, 0);
             view.setVisibility(View.INVISIBLE);
             if (bottomSheetBehavior != null)
-                bottomSheetBehavior.setState(BottomSheetBehavior.STATE_COLLAPSED);
+                bottomSheetBehavior.setState(STATE_COLLAPSED);
             return true;
         }
     }
@@ -287,15 +380,16 @@ public class MainActivity extends AppCompatActivity {
     class MyDragListener implements View.OnDragListener {
         @Override
         public boolean onDrag(View v, DragEvent event) {
+            View view = (View) event.getLocalState();
             switch (event.getAction()) {
                 case DragEvent.ACTION_DRAG_STARTED:
                     break;
                 case DragEvent.ACTION_DRAG_ENTERED:
                     break;
                 case DragEvent.ACTION_DRAG_EXITED:
+                    view.setVisibility(View.VISIBLE);
                     break;
                 case DragEvent.ACTION_DROP:
-                    View view = (View) event.getLocalState();
                     Drawable icon = ((ImageView) view.findViewById(R.id.img_icon)).getDrawable();
                     String name =
                             ((TextView) view.findViewById(R.id.text_appName)).getText().toString();
@@ -303,8 +397,11 @@ public class MainActivity extends AppCompatActivity {
                             .toString();
                     appScreen.addApp(new App(icon, name, packageName));
                     appAdapter.notifyDataSetChanged();
+                    textInputEditTextSearch.clearFocus();
+                    view.setVisibility(View.VISIBLE);
                     break;
                 case DragEvent.ACTION_DRAG_ENDED:
+                    view.setVisibility(View.VISIBLE);
                 default:
                     break;
             }
